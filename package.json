@@ -1,0 +1,28 @@
+{
+  "name": "cooking",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mini ERP monorepo (React + Express + Supabase)",
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w client\" \"npm run dev -w server\"",
+    "dev:client": "npm run dev -w client",
+    "dev:server": "npm run dev -w server",
+    "build": "npm run build -w client",
+    "lint": "npm run lint -w client"
+  },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "keywords": [
+    "erp",
+    "supabase",
+    "react",
+    "express"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
