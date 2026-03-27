@@ -24,12 +24,37 @@ router.get(
   requireRoles('sales', 'admin'),
   asyncHandler(async (request, response) => {
     const { page, pageSize, from, to } = getPagination(request.query);
+    const search = String(request.query.q || '').trim();
+    const statusFilter = String(request.query.status || 'all');
+    const sortBy = String(request.query.sortBy || 'issued_at');
+    const sortDir = String(request.query.sortDir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
 
-    const { data, error, count } = await supabaseAdmin
+    const sortable = {
+      id: 'id',
+      order: 'order_id',
+      amount: 'amount',
+      status: 'status',
+      issued: 'issued_at',
+      issued_at: 'issued_at',
+    };
+
+    const sortColumn = sortable[sortBy] || 'issued_at';
+
+    let query = supabaseAdmin
       .from('invoices')
-      .select('*, invoice_payments(amount), invoice_refunds(id, amount, status, note, created_at)', { count: 'exact' })
-      .range(from, to)
-      .order('issued_at', { ascending: false });
+      .select('*, invoice_payments(amount), invoice_refunds(id, amount, status, note, created_at)', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`id.ilike.%${search}%,order_id.ilike.%${search}%,status.ilike.%${search}%`);
+    }
+
+    if (statusFilter !== 'all') {
+      query = query.eq('status', statusFilter);
+    }
+
+    const { data, error, count } = await query
+      .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
+      .range(from, to);
 
     if (error) throw fromSupabaseError(error, { code: 'INVOICES_FETCH_FAILED' });
 
@@ -100,16 +125,43 @@ router.post(
 router.get(
   '/refunds/pending',
   requireRoles('admin'),
-  asyncHandler(async (_request, response) => {
-    const { data, error } = await supabaseAdmin
+  asyncHandler(async (request, response) => {
+    const { page, pageSize, from, to } = getPagination(request.query);
+    const search = String(request.query.q || '').trim();
+    const sortBy = String(request.query.sortBy || 'created_at');
+    const sortDir = String(request.query.sortDir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+
+    const sortable = {
+      id: 'id',
+      invoice: 'invoice_id',
+      amount: 'amount',
+      created: 'created_at',
+      created_at: 'created_at',
+    };
+
+    const sortColumn = sortable[sortBy] || 'created_at';
+
+    let query = supabaseAdmin
       .from('invoice_refunds')
-      .select('id, invoice_id, amount, note, status, created_at, invoices(id, order_id, amount, status, issued_at)')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true });
+      .select('id, invoice_id, amount, note, status, created_at, invoices(id, order_id, amount, status, issued_at)', {
+        count: 'exact',
+      })
+      .eq('status', 'pending');
+
+    if (search) {
+      query = query.or(`id.ilike.%${search}%,invoice_id.ilike.%${search}%,note.ilike.%${search}%`);
+    }
+
+    const { data, error, count } = await query
+      .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
+      .range(from, to);
 
     if (error) throw fromSupabaseError(error, { code: 'PENDING_REFUNDS_FETCH_FAILED' });
 
-    response.json({ data: data || [] });
+    response.json({
+      data: data || [],
+      meta: getPageMeta({ page, pageSize, total: count || 0 }),
+    });
   })
 );
 

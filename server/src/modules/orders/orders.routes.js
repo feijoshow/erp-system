@@ -28,14 +28,38 @@ router.get(
   '/',
   asyncHandler(async (request, response) => {
     const { page, pageSize, from, to } = getPagination(request.query);
+    const search = String(request.query.q || '').trim();
+    const statusFilter = String(request.query.status || 'all');
+    const sortBy = String(request.query.sortBy || 'created_at');
+    const sortDir = String(request.query.sortDir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
 
-    const { data, error, count } = await supabaseAdmin
+    const sortable = {
+      id: 'id',
+      status: 'status',
+      total: 'total_amount',
+      date: 'created_at',
+      created_at: 'created_at',
+    };
+
+    const sortColumn = sortable[sortBy] || 'created_at';
+
+    let query = supabaseAdmin
       .from('orders')
       .select('id, customer_id, created_by, total_amount, status, created_at, customers(full_name)', {
         count: 'exact',
-      })
-      .range(from, to)
-      .order('created_at', { ascending: false });
+      });
+
+    if (search) {
+      query = query.or(`id.ilike.%${search}%,status.ilike.%${search}%`);
+    }
+
+    if (statusFilter !== 'all') {
+      query = query.eq('status', statusFilter);
+    }
+
+    const { data, error, count } = await query
+      .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
+      .range(from, to);
 
     if (error) throw fromSupabaseError(error, { code: 'ORDERS_FETCH_FAILED' });
 
@@ -142,14 +166,50 @@ router.post(
 router.get(
   '/returns/list',
   requireRoles('sales', 'admin'),
-  asyncHandler(async (_request, response) => {
-    const { data, error } = await supabaseAdmin
+  asyncHandler(async (request, response) => {
+    const { page, pageSize, from, to } = getPagination(request.query);
+    const search = String(request.query.q || '').trim();
+    const statusFilter = String(request.query.status || 'all');
+    const sortBy = String(request.query.sortBy || 'created_at');
+    const sortDir = String(request.query.sortDir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+
+    const sortable = {
+      id: 'id',
+      order: 'order_id',
+      status: 'status',
+      created: 'created_at',
+      created_at: 'created_at',
+    };
+
+    const sortColumn = sortable[sortBy] || 'created_at';
+
+    let query = supabaseAdmin
       .from('order_returns')
-      .select('id, order_id, reason, status, decision_note, approved_at, created_at, order_return_items(id, product_id, quantity, line_total, products(name))')
-      .order('created_at', { ascending: false });
+      .select(
+        'id, order_id, reason, status, decision_note, approved_at, created_at, order_return_items(id, product_id, quantity, line_total, products(name))',
+        { count: 'exact' }
+      );
+
+    if (search) {
+      query = query.or(
+        `id.ilike.%${search}%,order_id.ilike.%${search}%,status.ilike.%${search}%,reason.ilike.%${search}%,decision_note.ilike.%${search}%`
+      );
+    }
+
+    if (statusFilter !== 'all') {
+      query = query.eq('status', statusFilter);
+    }
+
+    const { data, error, count } = await query
+      .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
+      .range(from, to);
 
     if (error) throw fromSupabaseError(error, { code: 'ORDER_RETURNS_FETCH_FAILED' });
-    response.json({ data });
+
+    response.json({
+      data,
+      meta: getPageMeta({ page, pageSize, total: count || 0 }),
+    });
   })
 );
 

@@ -1,41 +1,126 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import PaginationControls from '../components/ui/PaginationControls';
+import { useToast } from '../components/ui/ToastProvider';
 import { api } from '../lib/api';
 import { useAuth } from '../features/auth/AuthContext';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { downloadInvoiceReceipt } from '../lib/pdfReceipts';
+import { useTableControls } from '../hooks/useTableControls';
+import { useUrlTableState } from '../hooks/useUrlTableState';
 
 export default function Invoices() {
   const { getAccessToken, hasRole } = useAuth();
+  const toast = useToast();
   const canRecordPayment = hasRole('sales', 'admin');
   const canMarkPaid = hasRole('admin');
   const canRefund = hasRole('admin');
   const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [busyInvoiceId, setBusyInvoiceId] = useState(null);
-  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
   const [paymentAmountByInvoice, setPaymentAmountByInvoice] = useState({});
   const [refundAmountByInvoice, setRefundAmountByInvoice] = useState({});
+  const [paymentErrors, setPaymentErrors] = useState({});
+  const [refundErrors, setRefundErrors] = useState({});
+  const [meta, setMeta] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
+
+  const tableState = useUrlTableState('i_', {
+    filter: 'all',
+    sortKey: 'issued',
+    sortDirection: 'desc',
+    page: 1,
+    pageSize: 20,
+  });
+  const debouncedSearch = useDebouncedValue(tableState.search, 350);
+
+  const table = useTableControls(invoices, {
+    searchable: ['id', 'order_id', 'status'],
+    sorters: {
+      id: (row) => row.id,
+      order: (row) => row.order_id,
+      amount: (row) => Number(row.amount || 0),
+      balance: (row) => Number(row.balance_amount || 0),
+      status: (row) => row.status,
+      issued: (row) => new Date(row.issued_at).getTime(),
+    },
+    filter: (row, value) => (value === 'all' ? true : row.status === value),
+    state: {
+      search: tableState.search,
+      setSearch: tableState.setSearch,
+      activeFilter: tableState.activeFilter,
+      setActiveFilter: tableState.setActiveFilter,
+      sortKey: tableState.sortKey,
+      sortDirection: tableState.sortDirection,
+      setSort: tableState.setSort,
+    },
+    remote: true,
+  });
+
+  const columnCount =
+    10 + (canRecordPayment ? 1 : 0) + (canRefund ? 1 : 0) + (canMarkPaid ? 1 : 0) + 1;
+
+  function patchInvoice(invoiceId, updater) {
+    setInvoices((current) => current.map((invoice) => (invoice.id === invoiceId ? updater(invoice) : invoice)));
+  }
 
   async function loadInvoices() {
-    const token = await getAccessToken();
-    const payload = await api.getInvoices(token);
-    setInvoices(payload.data);
+    setLoading(true);
+    setError('');
+
+    try {
+      const token = await getAccessToken();
+      const payload = await api.getInvoices(token, {
+        page: tableState.page,
+        pageSize: tableState.pageSize,
+        q: debouncedSearch,
+        status: tableState.activeFilter,
+        sortBy: tableState.sortKey || 'issued_at',
+        sortDir: tableState.sortDirection || 'desc',
+      });
+      setInvoices(payload.data || []);
+      setMeta(payload.meta || { page: tableState.page, pageSize: tableState.pageSize, total: 0, totalPages: 1 });
+    } catch (nextError) {
+      setError(nextError.message || 'Unable to load invoices.');
+      toast.error(nextError.message || 'Unable to load invoices.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     loadInvoices().catch(console.error);
-  }, [getAccessToken]);
+  }, [
+    getAccessToken,
+    tableState.page,
+    tableState.pageSize,
+    debouncedSearch,
+    tableState.activeFilter,
+    tableState.sortKey,
+    tableState.sortDirection,
+  ]);
 
   async function handleMarkPaid(invoiceId) {
     setBusyInvoiceId(invoiceId);
-    setMessage('');
+    setError('');
+
+    const previous = invoices;
+    patchInvoice(invoiceId, (invoice) => ({
+      ...invoice,
+      status: 'paid',
+      paid_amount: Number(invoice.amount || invoice.paid_amount || 0),
+      balance_amount: 0,
+      net_paid_amount: Number(invoice.amount || invoice.net_paid_amount || 0),
+    }));
 
     try {
       const token = await getAccessToken();
       await api.payInvoice(token, invoiceId);
-      await loadInvoices();
-      setMessage('Invoice marked as paid.');
-    } catch (error) {
-      setMessage(error.message);
+      toast.success('Invoice marked as paid.');
+    } catch (nextError) {
+      setInvoices(previous);
+      setError(nextError.message || 'Unable to mark invoice as paid.');
+      toast.error(nextError.message || 'Unable to mark invoice as paid.');
     } finally {
       setBusyInvoiceId(null);
     }
@@ -45,21 +130,36 @@ export default function Invoices() {
     const rawAmount = paymentAmountByInvoice[invoiceId];
     const amount = Number(rawAmount);
     if (!amount || amount <= 0) {
-      setMessage('Payment amount must be greater than zero.');
+      setPaymentErrors((current) => ({ ...current, [invoiceId]: 'Payment amount must be greater than zero.' }));
       return;
     }
 
     setBusyInvoiceId(invoiceId);
-    setMessage('');
+    setError('');
+    setPaymentErrors((current) => ({ ...current, [invoiceId]: '' }));
+
+    const previous = invoices;
+    patchInvoice(invoiceId, (invoice) => {
+      const paidAmount = Number(invoice.paid_amount || 0) + amount;
+      const refundedAmount = Number(invoice.refunded_amount || 0);
+      const netPaidAmount = paidAmount - refundedAmount;
+      return {
+        ...invoice,
+        paid_amount: paidAmount,
+        net_paid_amount: netPaidAmount,
+        balance_amount: Math.max(Number(invoice.amount || 0) - netPaidAmount, 0),
+      };
+    });
 
     try {
       const token = await getAccessToken();
       await api.createInvoicePayment(token, invoiceId, { amount });
       setPaymentAmountByInvoice((current) => ({ ...current, [invoiceId]: '' }));
-      await loadInvoices();
-      setMessage('Payment recorded successfully.');
-    } catch (error) {
-      setMessage(error.message);
+      toast.success('Payment recorded successfully.');
+    } catch (nextError) {
+      setInvoices(previous);
+      setError(nextError.message || 'Unable to record payment.');
+      toast.error(nextError.message || 'Unable to record payment.');
     } finally {
       setBusyInvoiceId(null);
     }
@@ -69,73 +169,160 @@ export default function Invoices() {
     const rawAmount = refundAmountByInvoice[invoiceId];
     const amount = Number(rawAmount);
     if (!amount || amount <= 0) {
-      setMessage('Refund amount must be greater than zero.');
+      setRefundErrors((current) => ({ ...current, [invoiceId]: 'Refund amount must be greater than zero.' }));
       return;
     }
 
     setBusyInvoiceId(invoiceId);
-    setMessage('');
+    setError('');
+    setRefundErrors((current) => ({ ...current, [invoiceId]: '' }));
+
+    const optimisticRefundId = `temp-refund-${Date.now()}`;
+    const previous = invoices;
+    patchInvoice(invoiceId, (invoice) => ({
+      ...invoice,
+      pending_refund_amount: Number(invoice.pending_refund_amount || 0) + amount,
+      invoice_refunds: [
+        ...(invoice.invoice_refunds || []),
+        { id: optimisticRefundId, amount, status: 'pending' },
+      ],
+    }));
 
     try {
       const token = await getAccessToken();
       await api.createInvoiceRefund(token, invoiceId, { amount });
       setRefundAmountByInvoice((current) => ({ ...current, [invoiceId]: '' }));
+      toast.success('Refund request created.');
       await loadInvoices();
-      setMessage('Refund recorded successfully.');
-    } catch (error) {
-      setMessage(error.message);
+    } catch (nextError) {
+      setInvoices(previous);
+      setError(nextError.message || 'Unable to request refund.');
+      toast.error(nextError.message || 'Unable to request refund.');
     } finally {
       setBusyInvoiceId(null);
     }
   }
 
-  async function handleApproveRefund(refundId) {
-    const token = await getAccessToken();
-    await api.approveInvoiceRefund(token, refundId);
-    setMessage('Refund approved.');
-    await loadInvoices();
+  async function handleApproveRefund(invoiceId, refundId) {
+    const previous = invoices;
+    patchInvoice(invoiceId, (invoice) => ({
+      ...invoice,
+      pending_refund_amount: Math.max(Number(invoice.pending_refund_amount || 0) - Number((invoice.invoice_refunds || []).find((item) => item.id === refundId)?.amount || 0), 0),
+      refunded_amount:
+        Number(invoice.refunded_amount || 0) + Number((invoice.invoice_refunds || []).find((item) => item.id === refundId)?.amount || 0),
+      invoice_refunds: (invoice.invoice_refunds || []).map((item) =>
+        item.id === refundId ? { ...item, status: 'approved' } : item
+      ),
+    }));
+
+    try {
+      const token = await getAccessToken();
+      await api.approveInvoiceRefund(token, refundId);
+      toast.success('Refund approved.');
+      await loadInvoices();
+    } catch (nextError) {
+      setInvoices(previous);
+      setError(nextError.message || 'Unable to approve refund.');
+      toast.error(nextError.message || 'Unable to approve refund.');
+    }
   }
 
-  async function handleRejectRefund(refundId) {
+  async function handleRejectRefund(invoiceId, refundId) {
     const reason = window.prompt('Enter rejection reason:');
     if (!reason) return;
-    const token = await getAccessToken();
-    await api.rejectInvoiceRefund(token, refundId, { reason });
-    setMessage('Refund rejected.');
-    await loadInvoices();
+
+    const previous = invoices;
+    patchInvoice(invoiceId, (invoice) => ({
+      ...invoice,
+      pending_refund_amount: Math.max(Number(invoice.pending_refund_amount || 0) - Number((invoice.invoice_refunds || []).find((item) => item.id === refundId)?.amount || 0), 0),
+      invoice_refunds: (invoice.invoice_refunds || []).map((item) =>
+        item.id === refundId ? { ...item, status: 'rejected', note: reason } : item
+      ),
+    }));
+
+    try {
+      const token = await getAccessToken();
+      await api.rejectInvoiceRefund(token, refundId, { reason });
+      toast.info('Refund rejected.');
+      await loadInvoices();
+    } catch (nextError) {
+      setInvoices(previous);
+      setError(nextError.message || 'Unable to reject refund.');
+      toast.error(nextError.message || 'Unable to reject refund.');
+    }
   }
 
   async function printInvoiceReceipt(invoice) {
     try {
       await downloadInvoiceReceipt(invoice);
     } catch {
-      setMessage('Unable to generate receipt right now. Please try again.');
+      toast.error('Unable to generate receipt right now.');
     }
   }
 
   return (
     <div className="stack">
       <h1>Invoices</h1>
-      {message ? <p className="muted">{message}</p> : null}
+      {error ? <p className="status">{error}</p> : null}
       {canRefund ? (
         <p className="muted">
           Need a full approval list? <Link to="/admin/pending-refunds">Open pending refunds queue</Link>
         </p>
       ) : null}
       <section className="card">
+        {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
+        <div className="table-controls">
+          <input
+            type="search"
+            value={table.search}
+            placeholder="Search invoices"
+            onChange={(event) => table.setSearch(event.target.value)}
+          />
+          <select value={table.activeFilter} onChange={(event) => table.setActiveFilter(event.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partial</option>
+          </select>
+        </div>
+        {loading ? <p className="muted">Loading invoices...</p> : null}
         <table className="table">
           <thead>
             <tr>
-              <th>Invoice ID</th>
-              <th>Order</th>
-              <th>Amount</th>
+              <th>
+                <button className="sortable-button" type="button" onClick={() => table.toggleSort('id')}>
+                  Invoice ID <span className="sort-icon">{table.sortIndicator('id')}</span>
+                </button>
+              </th>
+              <th>
+                <button className="sortable-button" type="button" onClick={() => table.toggleSort('order')}>
+                  Order <span className="sort-icon">{table.sortIndicator('order')}</span>
+                </button>
+              </th>
+              <th>
+                <button className="sortable-button" type="button" onClick={() => table.toggleSort('amount')}>
+                  Amount <span className="sort-icon">{table.sortIndicator('amount')}</span>
+                </button>
+              </th>
               <th>Paid</th>
               <th>Refunded</th>
               <th>Net Paid</th>
               <th>Pending Refunds</th>
-              <th>Balance</th>
-              <th>Status</th>
-              <th>Issued</th>
+              <th>
+                <button className="sortable-button" type="button" onClick={() => table.toggleSort('balance')}>
+                  Balance <span className="sort-icon">{table.sortIndicator('balance')}</span>
+                </button>
+              </th>
+              <th>
+                <button className="sortable-button" type="button" onClick={() => table.toggleSort('status')}>
+                  Status <span className="sort-icon">{table.sortIndicator('status')}</span>
+                </button>
+              </th>
+              <th>
+                <button className="sortable-button" type="button" onClick={() => table.toggleSort('issued')}>
+                  Issued <span className="sort-icon">{table.sortIndicator('issued')}</span>
+                </button>
+              </th>
               {canRecordPayment ? <th>Payments</th> : null}
               {canRefund ? <th>Refunds</th> : null}
               {canMarkPaid ? <th>Actions</th> : null}
@@ -143,7 +330,14 @@ export default function Invoices() {
             </tr>
           </thead>
           <tbody>
-            {invoices.map((invoice) => (
+            {!loading && table.rows.length === 0 ? (
+              <tr>
+                <td colSpan={columnCount} className="muted">
+                  No invoices found.
+                </td>
+              </tr>
+            ) : null}
+            {table.rows.map((invoice) => (
               <tr key={invoice.id}>
                 <td>{invoice.id.slice(0, 8)}</td>
                 <td>{invoice.order_id.slice(0, 8)}</td>
@@ -157,28 +351,32 @@ export default function Invoices() {
                 <td>{new Date(invoice.issued_at).toLocaleDateString()}</td>
                 {canRecordPayment ? (
                   <td>
-                    <div className="inline-actions">
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        placeholder="Amount"
-                        value={paymentAmountByInvoice[invoice.id] || ''}
-                        onChange={(event) =>
-                          setPaymentAmountByInvoice((current) => ({
-                            ...current,
-                            [invoice.id]: event.target.value,
-                          }))
-                        }
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-small"
-                        disabled={busyInvoiceId === invoice.id || invoice.balance_amount <= 0}
-                        onClick={() => handleAddPayment(invoice.id)}
-                      >
-                        Add payment
-                      </button>
+                    <div className="stack">
+                      <div className="inline-actions">
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          placeholder="Amount"
+                          value={paymentAmountByInvoice[invoice.id] || ''}
+                          onChange={(event) => {
+                            setPaymentAmountByInvoice((current) => ({
+                              ...current,
+                              [invoice.id]: event.target.value,
+                            }));
+                            setPaymentErrors((current) => ({ ...current, [invoice.id]: '' }));
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          disabled={busyInvoiceId === invoice.id || invoice.balance_amount <= 0}
+                          onClick={() => handleAddPayment(invoice.id)}
+                        >
+                          Add payment
+                        </button>
+                      </div>
+                      {paymentErrors[invoice.id] ? <p className="status">{paymentErrors[invoice.id]}</p> : null}
                     </div>
                   </td>
                 ) : null}
@@ -192,12 +390,13 @@ export default function Invoices() {
                           step="0.01"
                           placeholder="Refund"
                           value={refundAmountByInvoice[invoice.id] || ''}
-                          onChange={(event) =>
+                          onChange={(event) => {
                             setRefundAmountByInvoice((current) => ({
                               ...current,
                               [invoice.id]: event.target.value,
-                            }))
-                          }
+                            }));
+                            setRefundErrors((current) => ({ ...current, [invoice.id]: '' }));
+                          }}
                         />
                         <button
                           type="button"
@@ -208,18 +407,23 @@ export default function Invoices() {
                           Request refund
                         </button>
                       </div>
+                      {refundErrors[invoice.id] ? <p className="status">{refundErrors[invoice.id]}</p> : null}
                       {(invoice.invoice_refunds || [])
                         .filter((refund) => refund.status === 'pending')
                         .map((refund) => (
                           <div className="inline-actions" key={refund.id}>
                             <span className="muted">Pending ${Number(refund.amount).toFixed(2)}</span>
-                            <button type="button" className="btn btn-small" onClick={() => handleApproveRefund(refund.id)}>
+                            <button
+                              type="button"
+                              className="btn btn-small"
+                              onClick={() => handleApproveRefund(invoice.id, refund.id)}
+                            >
                               Approve
                             </button>
                             <button
                               type="button"
                               className="btn btn-small btn-outline"
-                              onClick={() => handleRejectRefund(refund.id)}
+                              onClick={() => handleRejectRefund(invoice.id, refund.id)}
                             >
                               Reject
                             </button>
@@ -253,6 +457,16 @@ export default function Invoices() {
             ))}
           </tbody>
         </table>
+
+        <PaginationControls
+          page={tableState.page}
+          pageSize={tableState.pageSize}
+          totalPages={meta.totalPages}
+          total={meta.total}
+          loading={loading}
+          onPageChange={tableState.setPage}
+          onPageSizeChange={tableState.setPageSize}
+        />
       </section>
     </div>
   );

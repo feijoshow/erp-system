@@ -19,12 +19,27 @@ router.get(
   '/',
   asyncHandler(async (request, response) => {
     const { page, pageSize, from, to } = getPagination(request.query);
+    const search = String(request.query.q || '').trim();
+    const sortBy = String(request.query.sortBy || 'created_at');
+    const sortDir = String(request.query.sortDir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+    const sortable = {
+      name: 'full_name',
+      email: 'email',
+      phone: 'phone',
+      created_at: 'created_at',
+    };
 
-    const { data, error, count } = await supabaseAdmin
-      .from('customers')
-      .select('*', { count: 'exact' })
-      .range(from, to)
-      .order('created_at', { ascending: false });
+    const sortColumn = sortable[sortBy] || 'created_at';
+
+    let query = supabaseAdmin.from('customers').select('*', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
+    }
+
+    const { data, error, count } = await query
+      .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
+      .range(from, to);
 
     if (error) throw fromSupabaseError(error, { code: 'CUSTOMERS_FETCH_FAILED' });
 

@@ -1,4 +1,5 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
 
 const navItems = [
@@ -13,15 +14,23 @@ const navItems = [
 export default function AppLayout({ children }) {
   const { signOut, user, role } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [navOpen, setNavOpen] = useState(false);
+
+  const currentItem = navItems.find((item) => location.pathname.startsWith(item.to));
 
   async function handleSignOut() {
     await signOut();
     navigate('/login', { replace: true });
   }
 
+  function handleCloseNav() {
+    setNavOpen(false);
+  }
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar ${navOpen ? 'sidebar-open' : ''}`}>
         <Link to="/dashboard" className="brand">
           Mini ERP
         </Link>
@@ -32,6 +41,7 @@ export default function AppLayout({ children }) {
             <NavLink
               key={item.to}
               to={item.to}
+              onClick={handleCloseNav}
               className={({ isActive }) => (isActive ? 'nav-link nav-link-active' : 'nav-link')}
             >
               {item.label}
@@ -42,6 +52,19 @@ export default function AppLayout({ children }) {
 
       <main className="main-content">
         <header className="topbar">
+          <div className="topbar-title-wrap">
+            <button
+              type="button"
+              className="btn btn-outline nav-toggle"
+              onClick={() => setNavOpen((current) => !current)}
+            >
+              {navOpen ? 'Close menu' : 'Menu'}
+            </button>
+            <div>
+              <h1 className="page-title">{currentItem?.label || 'Workspace'}</h1>
+              <p className="muted">{new Date().toLocaleDateString()}</p>
+            </div>
+          </div>
           <div>
             <p className="muted">Signed in as</p>
             <strong>{user?.email}</strong>

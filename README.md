@@ -171,3 +171,7 @@ Re-run `supabase/schema.sql` in Supabase SQL Editor to create new tables/functio
 - Move order creation to Postgres RPC/transaction function for strict atomicity.
 - Add background jobs for async workflows (email invoices, monthly reports).
 - Add caching and pagination to list endpoints.
+
+## Upgrade roadmap
+
+- Detailed execution guide: `docs/upgrade-roadmap.md`

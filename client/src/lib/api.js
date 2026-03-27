@@ -1,45 +1,86 @@
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
-async function request(path, token, options = {}) {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-    ...options,
+function buildQuery(params = {}) {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+
+    query.set(key, String(value));
   });
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({ error: { message: 'Unexpected API error' } }));
-    throw new Error(payload?.error?.message || payload?.message || 'Request failed');
-  }
+  const queryString = query.toString();
+  return queryString ? `?${queryString}` : '';
+}
 
-  return response.json();
+async function request(path, token, options = {}) {
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? 15000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+      ...options,
+      signal: controller.signal,
+    });
+
+    const isJson = response.headers.get('content-type')?.includes('application/json');
+    const payload = isJson ? await response.json().catch(() => null) : null;
+
+    if (!response.ok) {
+      throw new Error(payload?.error?.message || payload?.message || `Request failed (${response.status})`);
+    }
+
+    if (response.status === 204) {
+      return { data: null };
+    }
+
+    return payload ?? { data: null };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+
+    if (error instanceof TypeError) {
+      throw new Error('Network error. Check your connection and try again.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export const api = {
   getMe: (token) => request('/me', token),
   getDashboard: (token) => request('/dashboard', token),
-  getProducts: (token) => request('/products', token),
+  getProducts: (token, params = {}) => request(`/products${buildQuery(params)}`, token),
   createProduct: (token, body) => request('/products', token, { method: 'POST', body: JSON.stringify(body) }),
   adjustProductStock: (token, productId, body) =>
     request(`/products/${productId}/adjust-stock`, token, { method: 'POST', body: JSON.stringify(body) }),
-  getCustomers: (token) => request('/customers', token),
+  getCustomers: (token, params = {}) => request(`/customers${buildQuery(params)}`, token),
   createCustomer: (token, body) => request('/customers', token, { method: 'POST', body: JSON.stringify(body) }),
-  getOrders: (token) => request('/orders', token),
+  getOrders: (token, params = {}) => request(`/orders${buildQuery(params)}`, token),
   getOrderItems: (token, orderId) => request(`/orders/${orderId}/items`, token),
-  getOrderReturns: (token) => request('/orders/returns/list', token),
+  getOrderReturns: (token, params = {}) => request(`/orders/returns/list${buildQuery(params)}`, token),
   approveOrderReturn: (token, returnId) => request(`/orders/returns/${returnId}/approve`, token, { method: 'POST' }),
   rejectOrderReturn: (token, returnId, body) =>
     request(`/orders/returns/${returnId}/reject`, token, { method: 'POST', body: JSON.stringify(body) }),
   createOrderReturn: (token, orderId, body) =>
     request(`/orders/${orderId}/returns`, token, { method: 'POST', body: JSON.stringify(body) }),
   createOrder: (token, body) => request('/orders', token, { method: 'POST', body: JSON.stringify(body) }),
-  getInvoices: (token) => request('/invoices', token),
+  getInvoices: (token, params = {}) => request(`/invoices${buildQuery(params)}`, token),
   getInvoicePayments: (token, invoiceId) => request(`/invoices/${invoiceId}/payments`, token),
   getInvoiceRefunds: (token, invoiceId) => request(`/invoices/${invoiceId}/refunds`, token),
-  getPendingInvoiceRefunds: (token) => request('/invoices/refunds/pending', token),
+  getPendingInvoiceRefunds: (token, params = {}) =>
+    request(`/invoices/refunds/pending${buildQuery(params)}`, token),
   createInvoicePayment: (token, invoiceId, body) =>
     request(`/invoices/${invoiceId}/payments`, token, { method: 'POST', body: JSON.stringify(body) }),
   createInvoiceRefund: (token, invoiceId, body) =>

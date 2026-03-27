@@ -12,7 +12,8 @@
   },
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "packages/*"
   ],
   "keywords": [
     "erp",

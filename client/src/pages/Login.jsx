@@ -1,11 +1,28 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useToast } from '../components/ui/ToastProvider';
 import { useAuth } from '../features/auth/AuthContext';
+
+function validateAuthForm(form) {
+  const errors = {};
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+    errors.email = 'Enter a valid email address.';
+  }
+
+  if (!form.password || form.password.length < 6) {
+    errors.password = 'Password must be at least 6 characters.';
+  }
+
+  return errors;
+}
 
 export default function Login() {
   const { user, signIn, signUp } = useAuth();
+  const toast = useToast();
   const [mode, setMode] = useState('signin');
   const [form, setForm] = useState({ email: '', password: '' });
+  const [formErrors, setFormErrors] = useState({});
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -15,6 +32,13 @@ export default function Login() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+
+    const errors = validateAuthForm(form);
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
     setBusy(true);
     setMessage('');
 
@@ -23,8 +47,12 @@ export default function Login() {
 
     if (error) {
       setMessage(error.message);
+      toast.error(error.message || 'Authentication failed.');
     } else if (mode === 'signup') {
       setMessage('Account created. Confirm your email if your project requires verification.');
+      toast.success('Account created successfully.');
+    } else {
+      toast.success('Signed in successfully.');
     }
 
     setBusy(false);
@@ -41,18 +69,26 @@ export default function Login() {
           id="email"
           type="email"
           value={form.email}
-          onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+          onChange={(event) => {
+            setForm((current) => ({ ...current, email: event.target.value }));
+            setFormErrors((current) => ({ ...current, email: '' }));
+          }}
           required
         />
+        {formErrors.email ? <p className="status">{formErrors.email}</p> : null}
 
         <label htmlFor="password">Password</label>
         <input
           id="password"
           type="password"
           value={form.password}
-          onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+          onChange={(event) => {
+            setForm((current) => ({ ...current, password: event.target.value }));
+            setFormErrors((current) => ({ ...current, password: '' }));
+          }}
           required
         />
+        {formErrors.password ? <p className="status">{formErrors.password}</p> : null}
 
         <button type="submit" className="btn" disabled={busy}>
           {busy ? 'Working...' : mode === 'signin' ? 'Sign in' : 'Create account'}
