@@ -127,6 +127,8 @@ Option 1: Render (both services)
 - Set env vars for both services:
   - API: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CLIENT_ORIGIN`
   - Client: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL`
+- Set `VITE_API_BASE_URL` to the API service origin, for example `https://mini-erp-api.onrender.com/api`
+- Do not point `VITE_API_BASE_URL` at the static client origin, or requests will 404 on the frontend host
 
 Option 2: Vercel + Render
 - Deploy `client` to Vercel (SPA rewrite is configured in `client/vercel.json`)
