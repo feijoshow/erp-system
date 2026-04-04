@@ -17,7 +17,12 @@ app.use(helmet());
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || env.clientOrigins.includes(origin)) {
+      const isLocalDevOrigin =
+        env.nodeEnv === 'development' &&
+        typeof origin === 'string' &&
+        /^https?:\/\/localhost:\d+$/.test(origin);
+
+      if (!origin || env.clientOrigins.includes(origin) || isLocalDevOrigin) {
         callback(null, true);
         return;
       }

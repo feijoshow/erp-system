@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import PaginationControls from '../components/ui/PaginationControls';
 import { useToast } from '../components/ui/ToastProvider';
 import { api } from '../lib/api';
@@ -194,7 +195,7 @@ export default function Customers() {
         <p className="muted">Only sales and admin roles can add customers.</p>
       )}
 
-      <section className="card">
+      <section className="card table-card">
         {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
         <div className="table-controls">
           <input
@@ -223,12 +224,13 @@ export default function Customers() {
                   Phone <span className="sort-icon">{table.sortIndicator('phone')}</span>
                 </button>
               </th>
+              <th>Profile</th>
             </tr>
           </thead>
           <tbody>
             {!loading && table.rows.length === 0 ? (
               <tr>
-                <td colSpan="3" className="muted">
+                <td colSpan="4" className="muted">
                   No customers yet.
                 </td>
               </tr>
@@ -238,6 +240,11 @@ export default function Customers() {
                 <td>{customer.full_name}</td>
                 <td>{customer.email || '-'}</td>
                 <td>{customer.phone || '-'}</td>
+                <td>
+                  <Link to={`/customers/${customer.id}`} className="btn btn-small btn-outline">
+                    View 360
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>

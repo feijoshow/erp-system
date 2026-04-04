@@ -24,6 +24,15 @@ const rejectReturnSchema = z.object({
   reason: z.string().min(3).max(300),
 });
 
+const noteSchema = z.object({
+  note: z.string().max(300).optional().or(z.literal('')),
+});
+
+const updateOrderStatusSchema = z.object({
+  status: z.enum(['submitted', 'cancelled']),
+  note: z.string().max(300).optional().or(z.literal('')),
+});
+
 router.get(
   '/',
   asyncHandler(async (request, response) => {
@@ -131,6 +140,82 @@ router.get(
 );
 
 router.post(
+  '/:orderId/status',
+  requireRoles('admin'),
+  asyncHandler(async (request, response) => {
+    const { orderId } = request.params;
+    const body = updateOrderStatusSchema.parse(request.body);
+
+    const { data: existingOrder, error: existingError } = await supabaseAdmin
+      .from('orders')
+      .select('id, status')
+      .eq('id', orderId)
+      .single();
+
+    if (existingError) throw fromSupabaseError(existingError, { code: 'ORDER_FETCH_FAILED' });
+
+    const currentStatus = String(existingOrder.status || '').toLowerCase();
+    const nextStatus = String(body.status || '').toLowerCase();
+
+    if (currentStatus === nextStatus) {
+      throw new AppError({
+        status: 409,
+        code: 'ORDER_STATUS_NO_OP',
+        message: `Order is already ${currentStatus}.`,
+      });
+    }
+
+    if (['cancelled', 'completed'].includes(currentStatus)) {
+      throw new AppError({
+        status: 409,
+        code: 'ORDER_STATUS_TERMINAL',
+        message: `Order in ${currentStatus} state cannot transition.`,
+      });
+    }
+
+    if (nextStatus === 'cancelled' && ['submitted', 'processing', 'completed'].includes(currentStatus)) {
+      throw new AppError({
+        status: 409,
+        code: 'ORDER_CANCEL_NOT_ALLOWED',
+        message: `Cancellation is not allowed once order reaches ${currentStatus}.`,
+      });
+    }
+
+    if (nextStatus === 'submitted' && !['draft', 'pending'].includes(currentStatus)) {
+      throw new AppError({
+        status: 409,
+        code: 'ORDER_SUBMIT_NOT_ALLOWED',
+        message: `Order cannot move from ${currentStatus} to submitted.`,
+      });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('orders')
+      .update({ status: body.status })
+      .eq('id', orderId)
+      .select('id, customer_id, created_by, total_amount, status, created_at, customers(full_name)')
+      .single();
+
+    if (error) throw fromSupabaseError(error, { code: 'ORDER_STATUS_UPDATE_FAILED' });
+
+    await writeAuditLog({
+      userId: request.user.id,
+      action: `order_status_${existingOrder.status}_to_${body.status}`,
+      entityType: 'order',
+      entityId: orderId,
+      note: body.note,
+    });
+
+    response.json({
+      data: {
+        ...data,
+        customer_name: data.customers?.full_name || null,
+      },
+    });
+  })
+);
+
+router.post(
   '/:orderId/returns',
   requireRoles('sales', 'admin'),
   asyncHandler(async (request, response) => {
@@ -218,6 +303,7 @@ router.post(
   requireRoles('admin'),
   asyncHandler(async (request, response) => {
     const { returnId } = request.params;
+    const body = noteSchema.parse(request.body || {});
 
     const { data, error } = await supabaseAdmin.rpc('approve_order_return', {
       p_order_return_id: returnId,
@@ -236,6 +322,7 @@ router.post(
       action: 'order_return_approved',
       entityType: 'order_return',
       entityId: returnId,
+      note: body.note,
     });
 
     response.json({ data });
@@ -267,6 +354,7 @@ router.post(
       action: 'order_return_rejected',
       entityType: 'order_return',
       entityId: returnId,
+      note: body.reason,
     });
 
     response.json({ data });

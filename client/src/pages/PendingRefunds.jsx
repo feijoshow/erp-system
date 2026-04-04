@@ -108,7 +108,7 @@ export default function PendingRefunds() {
       <h1>Pending Refunds</h1>
       <p className="muted">Admin queue for refund requests waiting for approval.</p>
       {message ? <p className="muted">{message}</p> : null}
-      <section className="card">
+      <section className="card table-card">
         {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
         {loading ? <p className="muted">Loading pending refunds...</p> : null}
         {!loading && refunds.length === 0 ? <p className="muted">No pending refunds in queue.</p> : null}

@@ -1,13 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import PaginationControls from '../components/ui/PaginationControls';
 import { useToast } from '../components/ui/ToastProvider';
 import { api } from '../lib/api';
 import { useAuth } from '../features/auth/AuthContext';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { downloadInvoiceReceipt } from '../lib/pdfReceipts';
 import { useTableControls } from '../hooks/useTableControls';
 import { useUrlTableState } from '../hooks/useUrlTableState';
+
+let pdfReceiptsModulePromise;
+
+async function getPdfReceiptsModule() {
+  if (!pdfReceiptsModulePromise) {
+    pdfReceiptsModulePromise = import('../lib/pdfReceipts');
+  }
+
+  return pdfReceiptsModulePromise;
+}
 
 export default function Invoices() {
   const { getAccessToken, hasRole } = useAuth();
@@ -24,6 +33,43 @@ export default function Invoices() {
   const [paymentErrors, setPaymentErrors] = useState({});
   const [refundErrors, setRefundErrors] = useState({});
   const [meta, setMeta] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [selectedInvoicePayments, setSelectedInvoicePayments] = useState([]);
+  const [selectedInvoiceRefunds, setSelectedInvoiceRefunds] = useState([]);
+  const [selectedInvoiceLoading, setSelectedInvoiceLoading] = useState(false);
+  const [selectedInvoiceError, setSelectedInvoiceError] = useState('');
+
+  const summary = useMemo(() => {
+    const totals = invoices.reduce(
+      (accumulator, invoice) => {
+        const balanceAmount = Number(invoice.balance_amount || 0);
+        const pendingRefundAmount = Number(invoice.pending_refund_amount || 0);
+
+        accumulator.outstandingAmount += balanceAmount;
+        accumulator.paidAmount += Number(invoice.paid_amount || 0);
+        accumulator.pendingRefundAmount += pendingRefundAmount;
+
+        if (balanceAmount > 0) {
+          accumulator.outstandingCount += 1;
+        }
+
+        if (pendingRefundAmount > 0) {
+          accumulator.pendingRefundCount += 1;
+        }
+
+        return accumulator;
+      },
+      {
+        outstandingAmount: 0,
+        outstandingCount: 0,
+        paidAmount: 0,
+        pendingRefundAmount: 0,
+        pendingRefundCount: 0,
+      }
+    );
+
+    return totals;
+  }, [invoices]);
 
   const tableState = useUrlTableState('i_', {
     filter: 'all',
@@ -59,6 +105,16 @@ export default function Invoices() {
 
   const columnCount =
     10 + (canRecordPayment ? 1 : 0) + (canRefund ? 1 : 0) + (canMarkPaid ? 1 : 0) + 1;
+
+  function SummaryCard({ label, value, hint }) {
+    return (
+      <article className="card stat-card summary-card">
+        <p className="muted">{label}</p>
+        <h3>{value}</h3>
+        <p className="card-subtitle">{hint}</p>
+      </article>
+    );
+  }
 
   function patchInvoice(invoiceId, updater) {
     setInvoices((current) => current.map((invoice) => (invoice.id === invoiceId ? updater(invoice) : invoice)));
@@ -252,9 +308,34 @@ export default function Invoices() {
     }
   }
 
+  async function handleViewInvoiceDetails(invoice) {
+    setSelectedInvoice(invoice);
+    setSelectedInvoiceError('');
+    setSelectedInvoiceLoading(true);
+
+    try {
+      const token = await getAccessToken();
+      const [paymentsPayload, refundsPayload] = await Promise.all([
+        api.getInvoicePayments(token, invoice.id),
+        api.getInvoiceRefunds(token, invoice.id),
+      ]);
+
+      setSelectedInvoicePayments(paymentsPayload.data || []);
+      setSelectedInvoiceRefunds(refundsPayload.data || []);
+    } catch (nextError) {
+      setSelectedInvoicePayments([]);
+      setSelectedInvoiceRefunds([]);
+      setSelectedInvoiceError(nextError.message || 'Unable to load invoice details.');
+      toast.error(nextError.message || 'Unable to load invoice details.');
+    } finally {
+      setSelectedInvoiceLoading(false);
+    }
+  }
+
   async function printInvoiceReceipt(invoice) {
     try {
-      await downloadInvoiceReceipt(invoice);
+      const pdfReceipts = await getPdfReceiptsModule();
+      await pdfReceipts.downloadInvoiceReceipt(invoice);
     } catch {
       toast.error('Unable to generate receipt right now.');
     }
@@ -269,7 +350,105 @@ export default function Invoices() {
           Need a full approval list? <Link to="/admin/pending-refunds">Open pending refunds queue</Link>
         </p>
       ) : null}
-      <section className="card">
+
+      {selectedInvoice ? (
+        <section className="card detail-panel">
+          <div className="detail-panel-header">
+            <div>
+              <p className="muted">Invoice drill-down</p>
+              <h2>{selectedInvoice.id.slice(0, 8)}</h2>
+              <p className="card-subtitle">
+                Order {selectedInvoice.order_id.slice(0, 8)} | {selectedInvoice.status} | Balance $
+                {Number(selectedInvoice.balance_amount || 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="inline-actions">
+              <button type="button" className="btn btn-small btn-outline" onClick={() => setSelectedInvoice(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+
+          {selectedInvoiceLoading ? <p className="muted">Loading invoice details...</p> : null}
+          {selectedInvoiceError ? <p className="status">{selectedInvoiceError}</p> : null}
+
+          {!selectedInvoiceLoading && !selectedInvoiceError ? (
+            <div className="detail-panel-grid">
+              <div>
+                <p className="muted">Payments</p>
+                {selectedInvoicePayments.length === 0 ? (
+                  <p className="muted">No payments recorded yet.</p>
+                ) : (
+                  <ul className="detail-list">
+                    {selectedInvoicePayments.map((payment) => (
+                      <li key={payment.id}>
+                        <span>{new Date(payment.created_at || payment.paid_at || Date.now()).toLocaleString()}</span>
+                        <strong>${Number(payment.amount || 0).toFixed(2)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <p className="muted">Refunds</p>
+                {selectedInvoiceRefunds.length === 0 ? (
+                  <p className="muted">No refunds for this invoice yet.</p>
+                ) : (
+                  <ul className="detail-list">
+                    {selectedInvoiceRefunds.map((refund) => (
+                      <li key={refund.id}>
+                        <span>{refund.status}</span>
+                        <strong>${Number(refund.amount || 0).toFixed(2)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <p className="muted">Invoice summary</p>
+                <ul className="detail-meta-list">
+                  <li>
+                    <span>Invoice</span>
+                    <strong>{selectedInvoice.id}</strong>
+                  </li>
+                  <li>
+                    <span>Order</span>
+                    <strong>{selectedInvoice.order_id}</strong>
+                  </li>
+                  <li>
+                    <span>Paid</span>
+                    <strong>${Number(selectedInvoice.paid_amount || 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Refunded</span>
+                    <strong>${Number(selectedInvoice.refunded_amount || 0).toFixed(2)}</strong>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      <section className="grid grid-3">
+        <SummaryCard
+          label="Outstanding balance"
+          value={`$${summary.outstandingAmount.toFixed(2)}`}
+          hint={`${summary.outstandingCount} invoices still need payment`}
+        />
+        <SummaryCard
+          label="Collected payments"
+          value={`$${summary.paidAmount.toFixed(2)}`}
+          hint="Gross amount recorded against invoices"
+        />
+        <SummaryCard
+          label="Pending refunds"
+          value={`$${summary.pendingRefundAmount.toFixed(2)}`}
+          hint={`${summary.pendingRefundCount} invoices have active refund requests`}
+        />
+      </section>
+
+      <section className="card table-card">
         {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
         <div className="table-controls">
           <input
@@ -323,16 +502,17 @@ export default function Invoices() {
                   Issued <span className="sort-icon">{table.sortIndicator('issued')}</span>
                 </button>
               </th>
+              {canMarkPaid ? <th>Actions</th> : null}
               {canRecordPayment ? <th>Payments</th> : null}
               {canRefund ? <th>Refunds</th> : null}
-              {canMarkPaid ? <th>Actions</th> : null}
+              <th>Details</th>
               <th>Receipt</th>
             </tr>
           </thead>
           <tbody>
             {!loading && table.rows.length === 0 ? (
               <tr>
-                <td colSpan={columnCount} className="muted">
+                <td colSpan={columnCount + 1} className="muted">
                   No invoices found.
                 </td>
               </tr>
@@ -448,6 +628,11 @@ export default function Invoices() {
                     </button>
                   </td>
                 ) : null}
+                <td>
+                  <button type="button" className="btn btn-small btn-outline" onClick={() => handleViewInvoiceDetails(invoice)}>
+                    Details
+                  </button>
+                </td>
                 <td>
                   <button type="button" className="btn btn-small" onClick={() => printInvoiceReceipt(invoice)}>
                     Print

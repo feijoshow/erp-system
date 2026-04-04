@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../features/auth/AuthContext';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+
+const DashboardHealthChart = lazy(() => import('../components/charts/DashboardHealthChart'));
 
 function StatCard({ label, value }) {
   return (
@@ -21,7 +23,7 @@ function formatCount(value) {
 }
 
 export default function Dashboard() {
-  const { getAccessToken } = useAuth();
+  const { getAccessToken, role } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState({
@@ -52,19 +54,63 @@ export default function Dashboard() {
     loadDashboard().catch(console.error);
   }, [getAccessToken]);
 
-  const healthData = [
-    { name: 'Products', value: Number(data.totalProducts || 0) },
-    { name: 'Customers', value: Number(data.totalCustomers || 0) },
-    { name: 'Orders', value: Number(data.totalOrders || 0) },
-    { name: 'Unpaid', value: Number(data.unpaidInvoices || 0) },
-  ];
+  const healthData = useMemo(
+    () => [
+      { name: 'Products', value: Number(data.totalProducts || 0) },
+      { name: 'Customers', value: Number(data.totalCustomers || 0) },
+      { name: 'Orders', value: Number(data.totalOrders || 0) },
+      { name: 'Unpaid', value: Number(data.unpaidInvoices || 0) },
+    ],
+    [data.totalProducts, data.totalCustomers, data.totalOrders, data.unpaidInvoices]
+  );
+
+  const roleView = role || 'sales';
+
+  const quickActionsByRole = {
+    admin: [
+      { to: '/approvals', title: 'Run approvals', description: 'Approve or reject returns, refunds, and order transitions.' },
+      { to: '/operations', title: 'Open operations center', description: 'Track cross-functional risk and live operating load.' },
+      { to: '/admin/pending-refunds', title: 'Clear refund queue', description: 'Resolve pending cash-out decisions quickly.' },
+      { to: '/invoices', title: 'Audit receivables', description: 'Investigate balances and mark invoices paid.' },
+    ],
+    inventory: [
+      { to: '/products', title: 'Control stock', description: 'Review low stock and apply inventory adjustments.' },
+      { to: '/orders', title: 'Watch fulfillment', description: 'Monitor order throughput and exceptions.' },
+      { to: '/operations', title: 'Open operations center', description: 'Track fulfillment pressure and return load.' },
+      { to: '/customers', title: 'Check demand accounts', description: 'Inspect customer order activity linked to stock movement.' },
+    ],
+    sales: [
+      { to: '/customers', title: 'Work customer pipeline', description: 'Review customer activity and payment profile.' },
+      { to: '/orders', title: 'Push order flow', description: 'Move new demand through to completion.' },
+      { to: '/invoices', title: 'Collect receivables', description: 'Follow unpaid balances and post payments.' },
+      { to: '/operations', title: 'Open operations center', description: 'Keep eyes on risk signals and queue pressure.' },
+    ],
+  };
+
+  const roleCommandCopy = {
+    admin: {
+      title: 'Admin Command View',
+      detail: 'Govern approvals, cash movements, and cross-module exceptions.',
+    },
+    inventory: {
+      title: 'Inventory Command View',
+      detail: 'Prioritize replenishment risk, fulfillment pacing, and return impact.',
+    },
+    sales: {
+      title: 'Sales Command View',
+      detail: 'Focus on order velocity, collection rhythm, and account follow-up.',
+    },
+  };
+
+  const quickActions = quickActionsByRole[roleView] || quickActionsByRole.sales;
+  const roleCommand = roleCommandCopy[roleView] || roleCommandCopy.sales;
 
   return (
     <div className="stack">
       <div className="page-title-row">
         <div>
           <h1>Dashboard</h1>
-          <p className="muted">Live operating snapshot for products, sales, and receivables.</p>
+          <p className="muted">Live operating snapshot for products, sales, receivables, and role priorities.</p>
         </div>
         <button type="button" className="btn btn-outline" onClick={loadDashboard} disabled={loading}>
           {loading ? 'Refreshing...' : 'Refresh'}
@@ -81,27 +127,65 @@ export default function Dashboard() {
         <StatCard label="Paid revenue" value={formatCurrency(data.paidRevenue)} />
       </section>
 
+      <section className="quick-actions-grid">
+        {quickActions.map((action) => (
+          <Link key={action.to} to={action.to} className="card quick-action-card">
+            <h2>{action.title}</h2>
+            <p className="muted">{action.description}</p>
+          </Link>
+        ))}
+      </section>
+
       <section className="card">
-        <h2>Operational Health</h2>
+        <div className="card-header card-header-tight">
+          <div>
+            <h2>{roleCommand.title}</h2>
+            <p className="card-subtitle">{roleCommand.detail}</p>
+          </div>
+        </div>
+        <ul className="detail-meta-list">
+          <li>
+            <span>Role context</span>
+            <strong>{roleView}</strong>
+          </li>
+          <li>
+            <span>Unpaid invoices</span>
+            <strong>{formatCount(data.unpaidInvoices)}</strong>
+          </li>
+          <li>
+            <span>Low stock products</span>
+            <strong>{formatCount(data.lowStockProducts?.length || 0)}</strong>
+          </li>
+          <li>
+            <span>Paid revenue</span>
+            <strong>{formatCurrency(data.paidRevenue)}</strong>
+          </li>
+        </ul>
+      </section>
+
+      <section className="card">
+        <div className="card-header card-header-tight">
+          <div>
+            <h2>Operational Health</h2>
+            <p className="card-subtitle">Relative volume across core entities</p>
+          </div>
+        </div>
         {loading ? (
           <p className="muted">Loading trend data...</p>
         ) : (
-          <div className="chart-wrap">
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={healthData}>
-                <CartesianGrid strokeDasharray="4 4" stroke="#d1d5db" />
-                <XAxis dataKey="name" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="value" fill="#0f766e" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <Suspense fallback={<p className="muted">Preparing chart...</p>}>
+            <DashboardHealthChart data={healthData} />
+          </Suspense>
         )}
       </section>
 
       <section className="card">
-        <h2>Low stock items</h2>
+        <div className="card-header card-header-tight">
+          <div>
+            <h2>Low stock items</h2>
+            <p className="card-subtitle">Products needing replenishment soon</p>
+          </div>
+        </div>
         {loading ? (
           <p className="muted">Loading low stock list...</p>
         ) : data.lowStockProducts.length === 0 ? (

@@ -1,4 +1,6 @@
-export default function PaginationControls({ page, pageSize, totalPages, total, loading, onPageChange, onPageSizeChange }) {
+import { memo } from 'react';
+
+function PaginationControls({ page, pageSize, totalPages, total, loading, onPageChange, onPageSizeChange }) {
   return (
     <div className="pagination-controls">
       <div className="pagination-summary">
@@ -31,3 +33,5 @@ export default function PaginationControls({ page, pageSize, totalPages, total, 
     </div>
   );
 }
+
+export default memo(PaginationControls);

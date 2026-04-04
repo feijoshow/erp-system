@@ -4,9 +4,18 @@ import { useToast } from '../components/ui/ToastProvider';
 import { api } from '../lib/api';
 import { useAuth } from '../features/auth/AuthContext';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { downloadReturnReceipt } from '../lib/pdfReceipts';
 import { useTableControls } from '../hooks/useTableControls';
 import { useUrlTableState } from '../hooks/useUrlTableState';
+
+let pdfReceiptsModulePromise;
+
+async function getPdfReceiptsModule() {
+  if (!pdfReceiptsModulePromise) {
+    pdfReceiptsModulePromise = import('../lib/pdfReceipts');
+  }
+
+  return pdfReceiptsModulePromise;
+}
 
 const blankItem = { productId: '', quantity: 1 };
 
@@ -44,6 +53,10 @@ export default function Orders() {
   const [customerId, setCustomerId] = useState('');
   const [items, setItems] = useState([blankItem]);
   const [orderItems, setOrderItems] = useState([]);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrderItems, setSelectedOrderItems] = useState([]);
+  const [selectedOrderLoading, setSelectedOrderLoading] = useState(false);
+  const [selectedOrderError, setSelectedOrderError] = useState('');
   const [returns, setReturns] = useState([]);
   const [returnForm, setReturnForm] = useState({ orderId: '', productId: '', quantity: 1, reason: '' });
   const [createErrors, setCreateErrors] = useState({});
@@ -115,12 +128,21 @@ export default function Orders() {
     remote: true,
   });
 
+  const orderQuickFilters = [
+    { label: 'All', value: 'all' },
+    { label: 'Pending', value: 'pending' },
+    { label: 'Processing', value: 'processing' },
+    { label: 'Completed', value: 'completed' },
+  ];
+
   async function loadData() {
     setLoading(true);
     setError('');
 
     try {
       const token = await getAccessToken();
+      const shouldLoadReference = customers.length === 0 || products.length === 0 || orderOptions.length === 0;
+
       const [ordersPayload, customersPayload, productsPayload, returnsPayload, orderOptionsPayload] = await Promise.all([
         api.getOrders(token, {
           page: orderState.page,
@@ -130,8 +152,8 @@ export default function Orders() {
           sortBy: orderState.sortKey || 'created_at',
           sortDir: orderState.sortDirection || 'desc',
         }),
-        api.getCustomers(token, { page: 1, pageSize: 100 }),
-        api.getProducts(token, { page: 1, pageSize: 100 }),
+        shouldLoadReference ? api.getCustomers(token, { page: 1, pageSize: 100 }) : Promise.resolve(null),
+        shouldLoadReference ? api.getProducts(token, { page: 1, pageSize: 100 }) : Promise.resolve(null),
         api.getOrderReturns(token, {
           page: returnState.page,
           pageSize: returnState.pageSize,
@@ -140,14 +162,24 @@ export default function Orders() {
           sortBy: returnState.sortKey || 'created_at',
           sortDir: returnState.sortDirection || 'desc',
         }),
-        api.getOrders(token, { page: 1, pageSize: 100 }),
+        shouldLoadReference ? api.getOrders(token, { page: 1, pageSize: 100 }) : Promise.resolve(null),
       ]);
 
       setOrders(ordersPayload.data || []);
-      setCustomers(customersPayload.data || []);
-      setProducts(productsPayload.data || []);
       setReturns(returnsPayload.data || []);
-      setOrderOptions(orderOptionsPayload.data || []);
+
+      if (customersPayload) {
+        setCustomers(customersPayload.data || []);
+      }
+
+      if (productsPayload) {
+        setProducts(productsPayload.data || []);
+      }
+
+      if (orderOptionsPayload) {
+        setOrderOptions(orderOptionsPayload.data || []);
+      }
+
       setOrderMeta(ordersPayload.meta || { page: orderState.page, pageSize: orderState.pageSize, total: 0, totalPages: 1 });
       setReturnMeta(
         returnsPayload.meta || { page: returnState.page, pageSize: returnState.pageSize, total: 0, totalPages: 1 }
@@ -254,6 +286,34 @@ export default function Orders() {
     }
   }
 
+  async function handleViewOrderDetails(order) {
+    setSelectedOrder(order);
+    setSelectedOrderError('');
+    setSelectedOrderLoading(true);
+
+    try {
+      const token = await getAccessToken();
+      const payload = await api.getOrderItems(token, order.id);
+      setSelectedOrderItems(payload.data || []);
+    } catch (nextError) {
+      setSelectedOrderItems([]);
+      setSelectedOrderError(nextError.message || 'Unable to load order details.');
+      toast.error(nextError.message || 'Unable to load order details.');
+    } finally {
+      setSelectedOrderLoading(false);
+    }
+  }
+
+  async function handleUseOrderForReturn() {
+    if (!selectedOrder) {
+      return;
+    }
+
+    setReturnForm((current) => ({ ...current, orderId: selectedOrder.id, productId: '' }));
+    setOrderItems(selectedOrderItems);
+    document.getElementById('order-return-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   async function handleReturn(event) {
     event.preventDefault();
     const validationErrors = validateReturnForm(returnForm);
@@ -355,7 +415,8 @@ export default function Orders() {
 
   async function printReturnReceipt(returnRequest) {
     try {
-      await downloadReturnReceipt(returnRequest);
+      const pdfReceipts = await getPdfReceiptsModule();
+      await pdfReceipts.downloadReturnReceipt(returnRequest);
     } catch {
       toast.error('Unable to generate return receipt right now.');
     }
@@ -427,7 +488,7 @@ export default function Orders() {
       )}
 
       {canCreate ? (
-        <form className="card grid grid-3" onSubmit={handleReturn}>
+        <form className="card grid grid-3" onSubmit={handleReturn} id="order-return-form">
           <select
             value={returnForm.orderId}
             onChange={(event) => {
@@ -491,7 +552,78 @@ export default function Orders() {
         </form>
       ) : null}
 
-      <section className="card">
+      <section className="card table-card">
+        {selectedOrder ? (
+          <section className="detail-panel">
+            <div className="detail-panel-header">
+              <div>
+                <p className="muted">Order drill-down</p>
+                <h2>{String(selectedOrder.id).slice(0, 8)}</h2>
+                <p className="card-subtitle">
+                  {selectedOrder.customer_name || 'Unknown customer'} | {selectedOrder.status} | $
+                  {Number(selectedOrder.total_amount || 0).toFixed(2)}
+                </p>
+              </div>
+              <div className="inline-actions">
+                <button type="button" className="btn btn-small btn-outline" onClick={() => setSelectedOrder(null)}>
+                  Close
+                </button>
+                {canCreate ? (
+                  <button type="button" className="btn btn-small" onClick={handleUseOrderForReturn}>
+                    Use for return
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {selectedOrderLoading ? <p className="muted">Loading order details...</p> : null}
+            {selectedOrderError ? <p className="status">{selectedOrderError}</p> : null}
+
+            {!selectedOrderLoading && !selectedOrderError ? (
+              <div className="detail-panel-grid">
+                <div>
+                  <p className="muted">Items</p>
+                  {selectedOrderItems.length === 0 ? (
+                    <p className="muted">No items returned for this order.</p>
+                  ) : (
+                    <ul className="detail-list">
+                      {selectedOrderItems.map((item) => (
+                        <li key={item.id}>
+                          <span>{item.products?.name || item.product_id}</span>
+                          <strong>
+                            {item.quantity} x ${Number(item.unit_price || 0).toFixed(2)}
+                          </strong>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div>
+                  <p className="muted">Quick facts</p>
+                  <ul className="detail-meta-list">
+                    <li>
+                      <span>Order ID</span>
+                      <strong>{selectedOrder.id}</strong>
+                    </li>
+                    <li>
+                      <span>Customer</span>
+                      <strong>{selectedOrder.customer_name || '-'}</strong>
+                    </li>
+                    <li>
+                      <span>Status</span>
+                      <strong>{selectedOrder.status}</strong>
+                    </li>
+                    <li>
+                      <span>Total</span>
+                      <strong>${Number(selectedOrder.total_amount || 0).toFixed(2)}</strong>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
         {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
         <div className="table-controls">
           <input
@@ -506,6 +638,18 @@ export default function Orders() {
             <option value="processing">Processing</option>
             <option value="completed">Completed</option>
           </select>
+        </div>
+        <div className="filter-pills" aria-label="Order status quick filters">
+          {orderQuickFilters.map((filter) => (
+            <button
+              key={filter.value}
+              type="button"
+              className={orderState.activeFilter === filter.value ? 'btn btn-small filter-pill filter-pill-active' : 'btn btn-small btn-outline filter-pill'}
+              onClick={() => orderState.setActiveFilter(filter.value)}
+            >
+              {filter.label}
+            </button>
+          ))}
         </div>
         {loading ? <p className="muted">Loading orders...</p> : null}
         <table className="table">
@@ -536,12 +680,13 @@ export default function Orders() {
                   Date <span className="sort-icon">{orderTable.sortIndicator('date')}</span>
                 </button>
               </th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {!loading && orderTable.rows.length === 0 ? (
               <tr>
-                <td colSpan="5" className="muted">
+                <td colSpan="6" className="muted">
                   No orders found.
                 </td>
               </tr>
@@ -553,6 +698,11 @@ export default function Orders() {
                 <td>${Number(order.total_amount).toFixed(2)}</td>
                 <td>{order.status}</td>
                 <td>{new Date(order.created_at).toLocaleDateString()}</td>
+                <td>
+                  <button type="button" className="btn btn-small btn-outline" onClick={() => handleViewOrderDetails(order)}>
+                    Details
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -569,7 +719,7 @@ export default function Orders() {
         />
       </section>
 
-      <section className="card">
+      <section className="card table-card">
         <h2>Return Requests</h2>
         {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
         <div className="table-controls">

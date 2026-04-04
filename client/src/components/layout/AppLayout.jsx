@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
+import { prefetchRoute } from '../../lib/routePrefetch';
+import { useToast } from '../ui/ToastProvider';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/operations', label: 'Operations Center' },
+  { to: '/approvals', label: 'Approvals', roles: ['admin'] },
   { to: '/products', label: 'Products' },
   { to: '/customers', label: 'Customers' },
   { to: '/orders', label: 'Orders' },
@@ -13,15 +17,39 @@ const navItems = [
 
 export default function AppLayout({ children }) {
   const { signOut, user, role } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
 
   const currentItem = navItems.find((item) => location.pathname.startsWith(item.to));
 
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!navOpen) {
+      return undefined;
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setNavOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [navOpen]);
+
   async function handleSignOut() {
-    await signOut();
-    navigate('/login', { replace: true });
+    try {
+      await signOut();
+      navigate('/login', { replace: true });
+    } catch (_error) {
+      toast.error('Unable to sign out right now. Please try again.');
+    }
   }
 
   function handleCloseNav() {
@@ -32,7 +60,7 @@ export default function AppLayout({ children }) {
     <div className="app-shell">
       <aside className={`sidebar ${navOpen ? 'sidebar-open' : ''}`}>
         <Link to="/dashboard" className="brand">
-          Mini ERP
+          Medium ERP
         </Link>
         <nav>
           {navItems
@@ -42,6 +70,8 @@ export default function AppLayout({ children }) {
               key={item.to}
               to={item.to}
               onClick={handleCloseNav}
+              onMouseEnter={() => prefetchRoute(item.to)}
+              onFocus={() => prefetchRoute(item.to)}
               className={({ isActive }) => (isActive ? 'nav-link nav-link-active' : 'nav-link')}
             >
               {item.label}
@@ -49,6 +79,12 @@ export default function AppLayout({ children }) {
             ))}
         </nav>
       </aside>
+      <button
+        type="button"
+        className={`sidebar-backdrop ${navOpen ? 'sidebar-backdrop-open' : ''}`}
+        onClick={handleCloseNav}
+        aria-label="Close navigation"
+      />
 
       <main className="main-content">
         <header className="topbar">

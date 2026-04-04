@@ -32,15 +32,20 @@ export function useUrlTableState(prefix, defaults = {}) {
     };
   }, [defaults.filter, defaults.page, defaults.pageSize, defaults.search, defaults.sortDirection, defaults.sortKey, key, searchParams]);
 
-  const updateParam = useCallback(
-    (paramKey, value) => {
+  const updateParams = useCallback(
+    (entries) => {
       setSearchParams((current) => {
         const next = new URLSearchParams(current);
-        if (value === '' || value == null) {
-          next.delete(key(paramKey));
-        } else {
+
+        Object.entries(entries).forEach(([paramKey, value]) => {
+          if (value === '' || value == null) {
+            next.delete(key(paramKey));
+            return;
+          }
+
           next.set(key(paramKey), String(value));
-        }
+        });
+
         return next;
       }, { replace: true });
     },
@@ -49,42 +54,40 @@ export function useUrlTableState(prefix, defaults = {}) {
 
   const setSearch = useCallback(
     (value) => {
-      updateParam('q', value);
-      updateParam('p', 1);
+      updateParams({ q: value, p: 1 });
     },
-    [updateParam]
+    [updateParams]
   );
 
   const setActiveFilter = useCallback(
     (value) => {
-      updateParam('f', value === 'all' ? '' : value);
-      updateParam('p', 1);
+      updateParams({ f: value === 'all' ? '' : value, p: 1 });
     },
-    [updateParam]
+    [updateParams]
   );
 
   const setSort = useCallback(
     (nextSortKey, nextSortDirection) => {
-      updateParam('sk', nextSortKey);
-      updateParam('sd', nextSortDirection);
-      updateParam('p', 1);
+      updateParams({ sk: nextSortKey, sd: nextSortDirection, p: 1 });
     },
-    [updateParam]
+    [updateParams]
   );
 
   const setPage = useCallback(
     (value) => {
-      updateParam('p', value <= 1 ? '' : value);
+      updateParams({ p: value <= 1 ? '' : value });
     },
-    [updateParam]
+    [updateParams]
   );
 
   const setPageSize = useCallback(
     (value) => {
-      updateParam('ps', value === (defaults.pageSize ?? 20) ? '' : value);
-      updateParam('p', 1);
+      updateParams({
+        ps: value === (defaults.pageSize ?? 20) ? '' : value,
+        p: 1,
+      });
     },
-    [defaults.pageSize, updateParam]
+    [defaults.pageSize, updateParams]
   );
 
   return {

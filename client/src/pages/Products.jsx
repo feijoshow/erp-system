@@ -313,7 +313,7 @@ export default function Products() {
         </form>
       ) : null}
 
-      <section className="card">
+      <section className="card table-card">
         {loading ? <div className="table-fetch-bar" aria-hidden="true" /> : null}
         <div className="table-controls">
           <input
@@ -367,7 +367,11 @@ export default function Products() {
                 <td>{product.name}</td>
                 <td>{product.sku}</td>
                 <td>${Number(product.price).toFixed(2)}</td>
-                <td>{product.stock_qty}</td>
+                <td>
+                  <span className={Number(product.stock_qty || 0) <= 10 ? 'stock-chip stock-chip-low' : 'stock-chip'}>
+                    {product.stock_qty}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>

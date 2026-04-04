@@ -7,8 +7,16 @@
     "dev": "concurrently \"npm run dev -w client\" \"npm run dev -w server\"",
     "dev:client": "npm run dev -w client",
     "dev:server": "npm run dev -w server",
-    "build": "npm run build -w client",
+    "build": "npm run build:types && npm run build -w client",
+    "build:types": "npm run build -w @mini-erp/types",
+    "typecheck:types": "npm run typecheck -w @mini-erp/types",
+    "audit:fix-safe": "npm install --package-lock-only",
     "lint": "npm run lint -w client"
+  },
+  "overrides": {
+    "brace-expansion": "1.1.13",
+    "lodash": "4.17.24",
+    "path-to-regexp": "0.1.13"
   },
   "workspaces": [
     "client",

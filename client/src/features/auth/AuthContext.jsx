@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { apiBaseUrl } from '../../lib/apiBaseUrl';
 import { supabase } from '../../lib/supabase';
 
 const AuthContext = createContext(null);
@@ -18,7 +19,7 @@ export function AuthProvider({ children }) {
     setLoadingProfile(true);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/me`, {
+      const response = await fetch(`${apiBaseUrl}/me`, {
         headers: {
           Authorization: `Bearer ${nextSession.access_token}`,
         },

@@ -19,6 +19,10 @@ const rejectRefundSchema = z.object({
   reason: z.string().min(3).max(300),
 });
 
+const noteSchema = z.object({
+  note: z.string().max(300).optional().or(z.literal('')),
+});
+
 router.get(
   '/',
   requireRoles('sales', 'admin'),
@@ -237,6 +241,7 @@ router.post(
   requireRoles('admin'),
   asyncHandler(async (request, response) => {
     const { refundId } = request.params;
+    const body = noteSchema.parse(request.body || {});
 
     const { data, error } = await supabaseAdmin.rpc('approve_invoice_refund', {
       p_refund_id: refundId,
@@ -255,6 +260,7 @@ router.post(
       action: 'invoice_refund_approved',
       entityType: 'invoice_refund',
       entityId: refundId,
+      note: body.note,
     });
 
     response.json({ data });
@@ -286,6 +292,7 @@ router.post(
       action: 'invoice_refund_rejected',
       entityType: 'invoice_refund',
       entityId: refundId,
+      note: body.reason,
     });
 
     response.json({ data });

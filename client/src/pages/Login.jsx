@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useToast } from '../components/ui/ToastProvider';
+import { toFriendlyAuthMessage } from '../features/auth/authErrorMessages';
 import { useAuth } from '../features/auth/AuthContext';
 
 function validateAuthForm(form) {
@@ -24,6 +25,7 @@ export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [formErrors, setFormErrors] = useState({});
   const [message, setMessage] = useState('');
+  const [hint, setHint] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (user) {
@@ -41,15 +43,19 @@ export default function Login() {
 
     setBusy(true);
     setMessage('');
+    setHint('');
 
     const fn = mode === 'signin' ? signIn : signUp;
     const { error } = await fn(form.email, form.password);
 
     if (error) {
-      setMessage(error.message);
-      toast.error(error.message || 'Authentication failed.');
+      const friendlyAuth = toFriendlyAuthMessage(error, mode);
+      setMessage(friendlyAuth.message);
+      setHint(friendlyAuth.hint || '');
+      toast.error(friendlyAuth.message);
     } else if (mode === 'signup') {
       setMessage('Account created. Confirm your email if your project requires verification.');
+      setHint('After confirming email, return to Sign in and continue.');
       toast.success('Account created successfully.');
     } else {
       toast.success('Signed in successfully.');
@@ -95,6 +101,7 @@ export default function Login() {
         </button>
 
         {message ? <p className="status">{message}</p> : null}
+        {hint ? <p className="muted">{hint}</p> : null}
 
         <button
           type="button"
