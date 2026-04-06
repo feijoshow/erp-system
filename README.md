@@ -85,6 +85,14 @@ All endpoints except `/api/health` require `Authorization: Bearer <supabase_acce
 - `GET /api/orders/returns/list`
 - `POST /api/orders/returns/:returnId/approve`
 - `POST /api/orders/returns/:returnId/reject`
+- `GET /api/procurement/suppliers`
+- `POST /api/procurement/suppliers`
+- `GET /api/procurement/purchase-orders`
+- `POST /api/procurement/purchase-orders`
+- `GET /api/procurement/purchase-orders/:purchaseOrderId/items`
+- `POST /api/procurement/purchase-orders/:purchaseOrderId/approve`
+- `POST /api/procurement/purchase-orders/:purchaseOrderId/receive`
+- `GET /api/procurement/analytics`
 - `GET /api/invoices`
 - `GET /api/invoices/:invoiceId/payments`
 - `POST /api/invoices/:invoiceId/payments`
@@ -125,7 +133,7 @@ Option 1: Render (both services)
 - Use `render.yaml` in the project root
 - Create Blueprint deploy in Render
 - Set env vars for both services:
-  - API: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CLIENT_ORIGIN`
+  - API: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CLIENT_ORIGIN`, `PROCUREMENT_APPROVAL_THRESHOLD`
   - Client: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL`
 - Set `VITE_API_BASE_URL` to the API service origin, for example `https://mini-erp-api.onrender.com/api`
 - Do not point `VITE_API_BASE_URL` at the static client origin, or requests will 404 on the frontend host

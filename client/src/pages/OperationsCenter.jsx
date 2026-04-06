@@ -182,6 +182,99 @@ export default function OperationsCenter() {
       .slice(0, 10);
   }, [snapshot]);
 
+  const collectionsForecast = useMemo(() => {
+    const outstandingInvoices = snapshot.invoices.filter((invoice) => Number(invoice.balance_amount || 0) > 0);
+
+    const pipeline = outstandingInvoices.reduce(
+      (accumulator, invoice) => {
+        const balance = Number(invoice.balance_amount || 0);
+        const ageDays = daysSince(invoice.issued_at);
+
+        if (ageDays <= 7) {
+          accumulator.likely += balance;
+          accumulator.collectable7d += balance * 0.75;
+          accumulator.collectable14d += balance * 0.9;
+        } else if (ageDays <= 14) {
+          accumulator.probable += balance;
+          accumulator.collectable7d += balance * 0.45;
+          accumulator.collectable14d += balance * 0.7;
+        } else {
+          accumulator.atRisk += balance;
+          accumulator.collectable7d += balance * 0.15;
+          accumulator.collectable14d += balance * 0.3;
+        }
+
+        return accumulator;
+      },
+      {
+        likely: 0,
+        probable: 0,
+        atRisk: 0,
+        collectable7d: 0,
+        collectable14d: 0,
+      }
+    );
+
+    return {
+      ...pipeline,
+      outstandingCount: outstandingInvoices.length,
+    };
+  }, [snapshot.invoices]);
+
+  const actionQueue = useMemo(() => {
+    const queue = [];
+    const pendingReturns = snapshot.returns.filter((item) => item.status === 'pending');
+    const oldestReturn = pendingReturns
+      .map((item) => daysSince(item.created_at))
+      .reduce((max, value) => Math.max(max, value), 0);
+
+    const oldestRefund = snapshot.pendingRefunds
+      .map((item) => daysSince(item.created_at))
+      .reduce((max, value) => Math.max(max, value), 0);
+
+    if (metrics.atRiskInvoices > 0) {
+      queue.push({
+        severity: 'high',
+        title: `Escalate ${metrics.atRiskInvoices} aged invoices`,
+        detail: `Prioritize ${formatMoney(collectionsForecast.atRisk)} at risk beyond 14 days.`,
+        route: '/invoices',
+        cta: 'Open receivables',
+      });
+    }
+
+    if (pendingReturns.length > 0) {
+      queue.push({
+        severity: oldestReturn > 3 ? 'high' : 'medium',
+        title: `Clear ${pendingReturns.length} pending return requests`,
+        detail: `Oldest pending return is ${oldestReturn} day(s) old.`,
+        route: '/approvals',
+        cta: 'Review returns',
+      });
+    }
+
+    if (canViewPendingRefunds && snapshot.pendingRefunds.length > 0) {
+      queue.push({
+        severity: oldestRefund > 2 ? 'high' : 'medium',
+        title: `Process ${snapshot.pendingRefunds.length} refund decisions`,
+        detail: `Oldest pending refund is ${oldestRefund} day(s) old.`,
+        route: '/approvals',
+        cta: 'Review refunds',
+      });
+    }
+
+    if (metrics.lowStockCount > 0) {
+      queue.push({
+        severity: 'medium',
+        title: `Replenish ${metrics.lowStockCount} low-stock SKUs`,
+        detail: 'Prevent service-level misses by replenishing critical inventory.',
+        route: '/products',
+        cta: 'Open inventory',
+      });
+    }
+
+    return queue.slice(0, 5);
+  }, [canViewPendingRefunds, collectionsForecast.atRisk, metrics, snapshot.pendingRefunds, snapshot.returns]);
+
   return (
     <div className="stack">
       <div className="page-title-row">
@@ -300,6 +393,69 @@ export default function OperationsCenter() {
                   <p>{event.subtitle}</p>
                 </div>
                 <time>{new Date(event.timestamp).toLocaleString()}</time>
+              </li>
+            ))}
+          </ul>
+        </article>
+      </section>
+
+      <section className="grid grid-3 ops-grid">
+        <article className="card ops-panel">
+          <div className="card-header card-header-tight">
+            <div>
+              <h2>Collections Forecast</h2>
+              <p className="card-subtitle">Expected receivable conversion over next 7-14 days</p>
+            </div>
+          </div>
+          <ul className="detail-meta-list">
+            <li>
+              <span>Open invoices</span>
+              <strong>{collectionsForecast.outstandingCount}</strong>
+            </li>
+            <li>
+              <span>Likely collectible</span>
+              <strong>{formatMoney(collectionsForecast.likely)}</strong>
+            </li>
+            <li>
+              <span>Probable collectible</span>
+              <strong>{formatMoney(collectionsForecast.probable)}</strong>
+            </li>
+            <li>
+              <span>At-risk exposure</span>
+              <strong>{formatMoney(collectionsForecast.atRisk)}</strong>
+            </li>
+            <li>
+              <span>Projected 7-day inflow</span>
+              <strong>{formatMoney(collectionsForecast.collectable7d)}</strong>
+            </li>
+            <li>
+              <span>Projected 14-day inflow</span>
+              <strong>{formatMoney(collectionsForecast.collectable14d)}</strong>
+            </li>
+          </ul>
+        </article>
+
+        <article className="card ops-panel">
+          <div className="card-header card-header-tight">
+            <div>
+              <h2>Priority Action Queue</h2>
+              <p className="card-subtitle">Operational tasks ranked by urgency and business impact</p>
+            </div>
+          </div>
+          <ul className="action-queue-list">
+            {actionQueue.length === 0 ? (
+              <li className="ops-alert ops-alert-good">
+                <strong>No urgent actions right now</strong>
+                <p>Keep monitoring current queues and cashflow trend.</p>
+              </li>
+            ) : null}
+            {actionQueue.map((item, index) => (
+              <li key={`${item.title}-${index}`} className={`ops-alert ops-alert-${item.severity}`}>
+                <strong>{item.title}</strong>
+                <p>{item.detail}</p>
+                <Link to={item.route} className="btn btn-small btn-outline">
+                  {item.cta}
+                </Link>
               </li>
             ))}
           </ul>

@@ -1,8 +1,10 @@
 const routeLoaders = {
   '/login': () => import('../pages/Login'),
   '/dashboard': () => import('../pages/Dashboard'),
+  '/analytics': () => import('../pages/Analytics'),
   '/operations': () => import('../pages/OperationsCenter'),
   '/approvals': () => import('../pages/Approvals'),
+  '/procurement': () => import('../pages/Procurement'),
   '/products': () => import('../pages/Products'),
   '/customers': () => import('../pages/Customers'),
   '/customers/profile': () => import('../pages/CustomerProfile'),

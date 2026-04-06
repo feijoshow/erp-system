@@ -9,9 +9,11 @@ import { loadRoute } from './lib/routePrefetch';
 const Customers = lazy(() => loadRoute('/customers'));
 const CustomerProfile = lazy(() => loadRoute('/customers/profile'));
 const Dashboard = lazy(() => loadRoute('/dashboard'));
+const Analytics = lazy(() => loadRoute('/analytics'));
 const Invoices = lazy(() => loadRoute('/invoices'));
 const Login = lazy(() => loadRoute('/login'));
 const Approvals = lazy(() => loadRoute('/approvals'));
+const Procurement = lazy(() => loadRoute('/procurement'));
 const OperationsCenter = lazy(() => loadRoute('/operations'));
 const Orders = lazy(() => loadRoute('/orders'));
 const PendingRefunds = lazy(() => loadRoute('/admin/pending-refunds'));
@@ -60,6 +62,19 @@ export default function App() {
       />
 
       <Route
+        path="/procurement"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={['inventory', 'admin']}>
+              <AppLayout>
+                {withRouteSuspense(<Procurement />)}
+              </AppLayout>
+            </RoleRoute>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
         path="/customers"
         element={
           <ProtectedRoute>
@@ -77,6 +92,19 @@ export default function App() {
             <AppLayout>
               {withRouteSuspense(<OperationsCenter />)}
             </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/analytics"
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={['sales', 'admin']}>
+              <AppLayout>
+                {withRouteSuspense(<Analytics />)}
+              </AppLayout>
+            </RoleRoute>
           </ProtectedRoute>
         }
       />

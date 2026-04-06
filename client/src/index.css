@@ -308,6 +308,18 @@ button:focus {
   gap: 0.6rem;
 }
 
+.action-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.action-queue-list .btn {
+  width: auto;
+}
+
 .ops-alert {
   border: 1px solid #d4deeb;
   border-radius: 0.8rem;
@@ -551,6 +563,18 @@ button:focus {
   min-height: 240px;
 }
 
+.analytics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.analytics-chart-wrap {
+  min-height: 300px;
+}
+
+.analytics-chart-wrap-sm {
+  min-height: 280px;
+}
+
 .low-stock-list {
   list-style: none;
   padding: 0;
@@ -631,6 +655,26 @@ button:focus {
   width: auto;
   display: inline-flex;
   align-items: center;
+}
+
+.customer-segment-cell {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.procurement-grid,
+.procurement-analytics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.procurement-receive-row {
+  width: 100%;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.procurement-receive-row .inline-actions input {
+  max-width: 120px;
 }
 
 .status-badge {
@@ -860,6 +904,15 @@ button:focus {
   }
 
   .customer-360-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .procurement-grid,
+  .procurement-analytics-grid {
     grid-template-columns: 1fr;
   }
 }

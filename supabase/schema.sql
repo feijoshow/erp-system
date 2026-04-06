@@ -989,6 +989,118 @@ create index if not exists idx_orders_customer_id on public.orders(customer_id);
 create index if not exists idx_orders_created_at on public.orders(created_at desc);
 create index if not exists idx_invoices_status on public.invoices(status);
 create index if not exists idx_activity_logs_entity on public.activity_logs(entity_type, entity_id);
+
+-- Procurement extension
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE t.typname = 'purchase_order_status' AND n.nspname = 'public'
+  ) THEN
+    CREATE TYPE public.purchase_order_status AS ENUM ('pending', 'pending_approval', 'approved', 'partial_received', 'received', 'cancelled');
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  ALTER TYPE public.purchase_order_status ADD VALUE IF NOT EXISTS 'pending_approval';
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$$;
+
+DO $$
+BEGIN
+  ALTER TYPE public.purchase_order_status ADD VALUE IF NOT EXISTS 'partial_received';
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$$;
+
+create table if not exists public.suppliers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  contact_email text,
+  phone text,
+  lead_time_days integer not null default 7 check (lead_time_days >= 0),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.purchase_orders (
+  id uuid primary key default gen_random_uuid(),
+  supplier_id uuid not null references public.suppliers(id) on delete restrict,
+  created_by uuid references public.profiles(id) on delete set null,
+  status public.purchase_order_status not null default 'pending',
+  expected_date date,
+  notes text,
+  total_amount numeric(12,2) not null default 0 check (total_amount >= 0),
+  created_at timestamptz not null default now(),
+  received_at timestamptz
+);
+
+create table if not exists public.purchase_order_items (
+  id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid not null references public.purchase_orders(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete restrict,
+  quantity integer not null check (quantity > 0),
+  received_qty integer not null default 0 check (received_qty >= 0),
+  unit_cost numeric(12,2) not null check (unit_cost > 0),
+  line_total numeric(12,2) not null check (line_total >= 0)
+);
+
+create index if not exists idx_suppliers_name on public.suppliers(name);
+create index if not exists idx_purchase_orders_status on public.purchase_orders(status, created_at);
+create index if not exists idx_purchase_order_items_po on public.purchase_order_items(purchase_order_id);
+
+alter table public.suppliers enable row level security;
+alter table public.purchase_orders enable row level security;
+alter table public.purchase_order_items enable row level security;
+
+drop policy if exists "inventory and admin can read suppliers" on public.suppliers;
+create policy "inventory and admin can read suppliers"
+on public.suppliers
+for select
+to authenticated
+using (public.current_user_role() in ('inventory', 'admin'));
+
+drop policy if exists "inventory and admin can create suppliers" on public.suppliers;
+create policy "inventory and admin can create suppliers"
+on public.suppliers
+for insert
+to authenticated
+with check (public.current_user_role() in ('inventory', 'admin'));
+
+drop policy if exists "inventory and admin can read purchase orders" on public.purchase_orders;
+create policy "inventory and admin can read purchase orders"
+on public.purchase_orders
+for select
+to authenticated
+using (public.current_user_role() in ('inventory', 'admin'));
+
+drop policy if exists "inventory and admin can manage purchase orders" on public.purchase_orders;
+create policy "inventory and admin can manage purchase orders"
+on public.purchase_orders
+for all
+to authenticated
+using (public.current_user_role() in ('inventory', 'admin'))
+with check (public.current_user_role() in ('inventory', 'admin'));
+
+drop policy if exists "inventory and admin can read purchase order items" on public.purchase_order_items;
+create policy "inventory and admin can read purchase order items"
+on public.purchase_order_items
+for select
+to authenticated
+using (public.current_user_role() in ('inventory', 'admin'));
+
+drop policy if exists "inventory and admin can manage purchase order items" on public.purchase_order_items;
+create policy "inventory and admin can manage purchase order items"
+on public.purchase_order_items
+for all
+to authenticated
+using (public.current_user_role() in ('inventory', 'admin'))
+with check (public.current_user_role() in ('inventory', 'admin'));
 create index if not exists idx_invoice_payments_invoice_id on public.invoice_payments(invoice_id);
 create index if not exists idx_order_return_items_order_id on public.order_return_items(order_id);
 create index if not exists idx_inventory_adjustments_product_id on public.inventory_adjustments(product_id);

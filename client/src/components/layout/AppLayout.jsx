@@ -6,8 +6,10 @@ import { useToast } from '../ui/ToastProvider';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
+  { to: '/analytics', label: 'Analytics', roles: ['sales', 'admin'] },
   { to: '/operations', label: 'Operations Center' },
   { to: '/approvals', label: 'Approvals', roles: ['admin'] },
+  { to: '/procurement', label: 'Procurement', roles: ['inventory', 'admin'] },
   { to: '/products', label: 'Products' },
   { to: '/customers', label: 'Customers' },
   { to: '/orders', label: 'Orders' },

@@ -38,6 +38,8 @@ export default function Customers() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [signalsById, setSignalsById] = useState({});
+  const [signalsLoading, setSignalsLoading] = useState(false);
   const [meta, setMeta] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
 
   const tableState = useUrlTableState('c_', {
@@ -99,6 +101,83 @@ export default function Customers() {
     tableState.sortKey,
     tableState.sortDirection,
   ]);
+
+  useEffect(() => {
+    const missingIds = customers
+      .map((customer) => customer.id)
+      .filter((id) => id && !String(id).startsWith('temp-') && !signalsById[id]);
+
+    if (missingIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadSignals() {
+      setSignalsLoading(true);
+      try {
+        const token = await getAccessToken();
+        const results = await Promise.all(
+          missingIds.map(async (customerId) => {
+            try {
+              const payload = await api.getCustomerProfile(token, customerId);
+              return {
+                customerId,
+                signal: {
+                  segment: payload.data?.segment || 'Standard',
+                  riskFlag: payload.data?.risk?.flag || 'low',
+                  riskScore: Number(payload.data?.risk?.score || 0),
+                },
+              };
+            } catch (_error) {
+              return {
+                customerId,
+                signal: {
+                  segment: 'Standard',
+                  riskFlag: 'low',
+                  riskScore: 0,
+                },
+              };
+            }
+          })
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setSignalsById((current) => {
+          const next = { ...current };
+          results.forEach((result) => {
+            next[result.customerId] = result.signal;
+          });
+          return next;
+        });
+      } finally {
+        if (!cancelled) {
+          setSignalsLoading(false);
+        }
+      }
+    }
+
+    loadSignals().catch(console.error);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [customers, getAccessToken, signalsById]);
+
+  function segmentClass(segment) {
+    if (segment === 'VIP') return 'status-badge customer-segment-vip';
+    if (segment === 'Watchlist') return 'status-badge customer-segment-watchlist';
+    return 'status-badge customer-segment-standard';
+  }
+
+  function riskClass(flag) {
+    if (flag === 'high') return 'status-badge customer-risk-high';
+    if (flag === 'medium') return 'status-badge customer-risk-medium';
+    return 'status-badge customer-risk-low';
+  }
 
   async function handleCreate(event) {
     event.preventDefault();
@@ -204,6 +283,7 @@ export default function Customers() {
             placeholder="Search customers"
             onChange={(event) => table.setSearch(event.target.value)}
           />
+          {signalsLoading ? <p className="muted">Refreshing customer intelligence...</p> : null}
         </div>
         {loading ? <p className="muted">Loading customers...</p> : null}
         <table className="table">
@@ -224,13 +304,14 @@ export default function Customers() {
                   Phone <span className="sort-icon">{table.sortIndicator('phone')}</span>
                 </button>
               </th>
+              <th>Segment</th>
               <th>Profile</th>
             </tr>
           </thead>
           <tbody>
             {!loading && table.rows.length === 0 ? (
               <tr>
-                <td colSpan="4" className="muted">
+                <td colSpan="5" className="muted">
                   No customers yet.
                 </td>
               </tr>
@@ -240,6 +321,16 @@ export default function Customers() {
                 <td>{customer.full_name}</td>
                 <td>{customer.email || '-'}</td>
                 <td>{customer.phone || '-'}</td>
+                <td>
+                  <div className="customer-segment-cell">
+                    <span className={segmentClass(signalsById[customer.id]?.segment || 'Standard')}>
+                      {signalsById[customer.id]?.segment || 'Standard'}
+                    </span>
+                    <span className={riskClass(signalsById[customer.id]?.riskFlag || 'low')}>
+                      Risk {String(signalsById[customer.id]?.riskFlag || 'low').toUpperCase()} ({signalsById[customer.id]?.riskScore || 0})
+                    </span>
+                  </div>
+                </td>
                 <td>
                   <Link to={`/customers/${customer.id}`} className="btn btn-small btn-outline">
                     View 360

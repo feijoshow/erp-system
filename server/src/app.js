@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import analyticsRouter from './modules/analytics/analytics.routes.js';
 import { env } from './config/env.js';
 import { requireAuth } from './middleware/auth.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -9,6 +10,7 @@ import customersRouter from './modules/customers/customers.routes.js';
 import dashboardRouter from './modules/dashboard/dashboard.routes.js';
 import invoicesRouter from './modules/invoices/invoices.routes.js';
 import ordersRouter from './modules/orders/orders.routes.js';
+import procurementRouter from './modules/procurement/procurement.routes.js';
 import productsRouter from './modules/products/products.routes.js';
 
 export const app = express();
@@ -56,6 +58,8 @@ app.use('/api/customers', customersRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/invoices', invoicesRouter);
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/procurement', procurementRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

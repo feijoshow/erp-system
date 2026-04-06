@@ -62,6 +62,7 @@ async function request(path, token, options = {}) {
 export const api = {
   getMe: (token) => request('/me', token),
   getDashboard: (token) => request('/dashboard', token),
+  getAnalytics: (token, params = {}) => request(`/analytics${buildQuery(params)}`, token),
   getActivityLogs: (token, params = {}) => request(`/dashboard/activity-logs${buildQuery(params)}`, token),
   getProducts: (token, params = {}) => request(`/products${buildQuery(params)}`, token),
   createProduct: (token, body) => request('/products', token, { method: 'POST', body: JSON.stringify(body) }),
@@ -70,6 +71,21 @@ export const api = {
   getCustomers: (token, params = {}) => request(`/customers${buildQuery(params)}`, token),
   getCustomerProfile: (token, customerId) => request(`/customers/${customerId}/profile`, token),
   createCustomer: (token, body) => request('/customers', token, { method: 'POST', body: JSON.stringify(body) }),
+  getSuppliers: (token, params = {}) => request(`/procurement/suppliers${buildQuery(params)}`, token),
+  createSupplier: (token, body) => request('/procurement/suppliers', token, { method: 'POST', body: JSON.stringify(body) }),
+  getPurchaseOrders: (token, params = {}) => request(`/procurement/purchase-orders${buildQuery(params)}`, token),
+  getPurchaseOrderItems: (token, purchaseOrderId) =>
+    request(`/procurement/purchase-orders/${purchaseOrderId}/items`, token),
+  getProcurementAnalytics: (token, params = {}) => request(`/procurement/analytics${buildQuery(params)}`, token),
+  createPurchaseOrder: (token, body) =>
+    request('/procurement/purchase-orders', token, { method: 'POST', body: JSON.stringify(body) }),
+  approvePurchaseOrder: (token, purchaseOrderId) =>
+    request(`/procurement/purchase-orders/${purchaseOrderId}/approve`, token, { method: 'POST' }),
+  receivePurchaseOrder: (token, purchaseOrderId, body) =>
+    request(`/procurement/purchase-orders/${purchaseOrderId}/receive`, token, {
+      method: 'POST',
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }),
   getOrders: (token, params = {}) => request(`/orders${buildQuery(params)}`, token),
   getOrderItems: (token, orderId) => request(`/orders/${orderId}/items`, token),
   updateOrderStatus: (token, orderId, body) =>
